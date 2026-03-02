@@ -252,8 +252,8 @@ class LLMConfig(BaseSettings):
 
 ## 相关决策
 
-- [ADR-001: Web 框架选型 - FastAPI](./ADR-001-web-framework.md)
-- [ADR-002: 向量数据库选型 - Qdrant](./ADR-002-vector-database.md)
+- [ADR-001: Web框架选型 - FastAPI](./ADR-001-Web框架选型.md)
+- [ADR-002: 向量数据库选型 - Qdrant](./ADR-002-向量数据库选型.md)
 
 ---
 

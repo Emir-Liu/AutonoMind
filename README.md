@@ -15,20 +15,20 @@ AutonoMind 是一个具备**自主决策**、**自我进化**能力的 AI Agent 
 ## 文档
 
 ### 架构文档
-- [系统架构设计](./docs/architecture/system-architecture.md) - 整体架构、核心模块、技术选型
-- [数据模型设计](./docs/data-model.md) - 数据库设计、向量数据库、缓存设计
+- [系统架构设计](./docs/architecture/系统架构设计.md) - 整体架构、核心模块、技术选型
+- [数据模型设计](./docs/数据模型设计.md) - 数据库设计、向量数据库、缓存设计
 
 ### 产品文档
-- [产品需求文档(PRD)](./docs/product/prd.md) - 功能需求、用户画像、验收标准
-- [用户故事](./docs/product/user-stories.md) - 详细的用户故事和验收标准
+- [产品需求文档(PRD)](./docs/product/产品需求文档.md) - 功能需求、用户画像、验收标准
+- [用户故事](./docs/product/用户故事.md) - 详细的用户故事和验收标准
 
 ### 技术文档
-- [API 接口文档](./docs/api/api-reference.md) - RESTful API 完整参考
+- [API 接口文档](./docs/api/API接口文档.md) - RESTful API 完整参考
 - [技术决策(ADR)](./docs/adr/) - 技术选型决策记录
-  - [Web 框架选型 - FastAPI](./docs/adr/ADR-001-web-framework.md)
-  - [向量数据库选型 - Qdrant](./docs/adr/ADR-002-vector-database.md)
-  - [LLM 框架选型 - LangChain](./docs/adr/ADR-003-llm-framework.md)
-  - [任务队列选型 - Celery](./docs/adr/ADR-004-task-queue.md)
+  - [Web框架选型 - FastAPI](./docs/adr/ADR-001-Web框架选型.md)
+  - [向量数据库选型 - Qdrant](./docs/adr/ADR-002-向量数据库选型.md)
+  - [LLM框架选型 - LangChain](./docs/adr/ADR-003-LLM框架选型.md)
+  - [任务队列选型 - Celery](./docs/adr/ADR-004-任务队列选型.md)
 
 ## 技术栈
 
@@ -47,14 +47,22 @@ AutonoMind 是一个具备**自主决策**、**自我进化**能力的 AI Agent 
 
 ```
 AutonoMind/
-├── docs/                 # 文档目录
-│   ├── architecture/    # 架构文档
-│   ├── product/         # 产品文档
-│   ├── api/             # API 文档
-│   ├── adr/             # 技术决策记录
-│   └── data-model.md    # 数据模型设计
-├── code/                # 代码目录(待创建)
-└── README.md            # 项目说明
+├── docs/                      # 文档目录
+│   ├── architecture/          # 架构文档
+│   │   └── 系统架构设计.md
+│   ├── product/               # 产品文档
+│   │   ├── 产品需求文档.md
+│   │   └── 用户故事.md
+│   ├── api/                   # API 文档
+│   │   └── API接口文档.md
+│   ├── adr/                   # 技术决策记录
+│   │   ├── ADR-001-Web框架选型.md
+│   │   ├── ADR-002-向量数据库选型.md
+│   │   ├── ADR-003-LLM框架选型.md
+│   │   └── ADR-004-任务队列选型.md
+│   └── 数据模型设计.md
+├── code/                      # 代码目录(待创建)
+└── README.md                  # 项目说明
 ```
 
 ## 快速开始

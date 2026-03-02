@@ -1006,5 +1006,324 @@ console.log(response.content);
 
 ---
 
+## 13. WebSocket 实时通信
+
+### 13.1 连接
+
+建立 WebSocket 连接以接收实时消息。
+
+```http
+ws://localhost:8000/api/v1/ws?token=<your_jwt_token>
+```
+
+**查询参数**:
+
+| 参数 | 类型 | 必需 | 说明 |
+|------|------|------|------|
+| `token` | string | 是 | JWT Token |
+
+### 13.2 消息格式
+
+**服务器推送消息**:
+
+```json
+{
+  "type": "message",
+  "data": {
+    "session_id": "sess_abc123",
+    "message_id": "msg_xyz789",
+    "content": "...",
+    "role": "assistant"
+  }
+}
+```
+
+**消息类型**:
+
+| 类型 | 说明 |
+|------|------|
+| `message` | 新消息 |
+| `status` | 会话状态更新 |
+| `error` | 错误通知 |
+| `knowledge_update` | 知识库更新 |
+
+### 13.3 心跳机制
+
+客户端每30秒发送一次心跳:
+
+```json
+{
+  "type": "ping"
+}
+```
+
+服务器响应:
+
+```json
+{
+  "type": "pong",
+  "timestamp": "2026-03-02T10:00:00Z"
+}
+```
+
+---
+
+## 14. 流式响应 API
+
+### 14.1 流式发送消息
+
+支持 SSE(Server-Sent Events)流式返回 AI 响应。
+
+```http
+POST /api/v1/sessions/{session_id}/messages/stream
+Content-Type: application/json
+
+{
+  "role": "user",
+  "content": "写一篇关于 FastAPI 的文章"
+}
+```
+
+**响应**(SSE 流):
+
+```
+data: {"type":"start","message_id":"msg_001"}
+
+data: {"type":"token","content":"FastAPI"}
+
+data: {"type":"token","content":" 是"}
+
+data: {"type":"token","content":" 一个"}
+
+...
+
+data: {"type":"end","tokens_used":150}
+```
+
+---
+
+## 15. 文件上传
+
+### 15.1 单文件上传
+
+```http
+POST /api/v1/files/upload
+Content-Type: multipart/form-data
+
+file: <文件>
+metadata: {"category": "document"}
+```
+
+**响应**:
+
+```json
+{
+  "success": true,
+  "data": {
+    "file_id": "file_001",
+    "filename": "document.pdf",
+    "file_size": 1024000,
+    "file_path": "documents/user_123/file_001.pdf",
+    "url": "http://localhost:9000/autonomind/documents/user_123/file_001.pdf"
+  }
+}
+```
+
+### 15.2 批量上传
+
+```http
+POST /api/v1/files/upload/batch
+Content-Type: multipart/form-data
+
+files: <文件1>
+files: <文件2>
+files: <文件3>
+```
+
+---
+
+## 16. 数据导出
+
+### 16.1 导出会话记录
+
+```http
+GET /api/v1/sessions/{session_id}/export
+Accept: application/json
+```
+
+**响应**:
+
+```json
+{
+  "success": true,
+  "data": {
+    "format": "json",
+    "content": {
+      "session_id": "sess_abc123",
+      "created_at": "2026-03-02T10:00:00Z",
+      "messages": [...]
+    }
+  }
+}
+```
+
+### 16.2 导出为其他格式
+
+```http
+GET /api/v1/sessions/{session_id}/export?format=markdown
+Accept: text/markdown
+```
+
+---
+
+## 17. 批量操作
+
+### 17.1 批量删除知识
+
+```http
+DELETE /api/v1/knowledge/batch
+Content-Type: application/json
+
+{
+  "knowledge_ids": ["kno_001", "kno_002", "kno_003"]
+}
+```
+
+**响应**:
+
+```json
+{
+  "success": true,
+  "data": {
+    "deleted_count": 3,
+    "failed_count": 0
+  }
+}
+```
+
+### 17.2 批量更新知识
+
+```http
+PATCH /api/v1/knowledge/batch
+Content-Type: application/json
+
+{
+  "updates": [
+    {
+      "knowledge_id": "kno_001",
+      "metadata": {"category": "updated"}
+    },
+    {
+      "knowledge_id": "kno_002",
+      "status": "archived"
+    }
+  ]
+}
+```
+
+---
+
+## 18. 系统信息 API
+
+### 18.1 获取系统状态
+
+```http
+GET /api/v1/system/status
+```
+
+**响应**:
+
+```json
+{
+  "success": true,
+  "data": {
+    "status": "healthy",
+    "version": "1.0.0",
+    "components": {
+      "database": "healthy",
+      "vector_db": "healthy",
+      "cache": "healthy",
+      "queue": "healthy"
+    },
+    "uptime": 86400,
+    "timestamp": "2026-03-02T10:00:00Z"
+  }
+}
+```
+
+### 18.2 获取系统统计
+
+```http
+GET /api/v1/system/stats
+```
+
+**响应**:
+
+```json
+{
+  "success": true,
+  "data": {
+    "users": {
+      "total": 100,
+      "active": 80
+    },
+    "sessions": {
+      "total": 1000,
+      "active": 50
+    },
+    "knowledge": {
+      "total": 5000,
+      "active": 4800
+    },
+    "messages": {
+      "total": 100000,
+      "today": 1000
+    }
+  }
+}
+```
+
+---
+
+## 19. API 限流规则
+
+### 19.1 限流配置
+
+| 端点类型 | 限制 |
+|---------|------|
+| 认证 API | 10 req/min |
+| 消息 API | 60 req/min |
+| 知识检索 | 100 req/min |
+| 文件上传 | 5 req/min |
+| 其他 API | 100 req/min |
+
+### 19.2 限流响应
+
+```json
+{
+  "success": false,
+  "error": {
+    "code": "RATE_LIMIT_EXCEEDED",
+    "message": "请求过于频繁",
+    "details": {
+      "limit": 60,
+      "remaining": 0,
+      "reset_at": "2026-03-02T10:01:00Z"
+    }
+  }
+}
+```
+
+---
+
+## 20. API 变更日志
+
+### v1.0 (2026-03-02)
+- 初始版本发布
+- 核心功能:会话管理、消息管理、知识库、工具管理、执行日志
+
+---
+
 **文档版本**: v1.0
 **最后更新**: 2026-03-02
+

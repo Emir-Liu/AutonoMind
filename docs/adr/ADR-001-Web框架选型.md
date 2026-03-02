@@ -158,8 +158,8 @@ async def query(
 
 ## 相关决策
 
-- [ADR-002: 向量数据库选型 - Qdrant](./ADR-002-vector-database.md)
-- [ADR-003: LLM 框架选型 - LangChain](./ADR-003-llm-framework.md)
+- [ADR-002: 向量数据库选型 - Qdrant](./ADR-002-向量数据库选型.md)
+- [ADR-003: LLM框架选型 - LangChain](./ADR-003-LLM框架选型.md)
 
 ---
 
