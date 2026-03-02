@@ -1,0 +1,224 @@
+# ADR-002: 向量数据库选型 - Qdrant
+
+## 状态
+
+已接受
+
+## 背景
+
+AutonoMind 需要一个高性能的向量数据库来存储和检索知识库的向量表示。需要支持高性能检索、元数据过滤、水平扩展和易部署。
+
+## 决策
+
+选择 **Qdrant** 作为向量数据库。
+
+## 备选方案
+
+### 方案 A: Qdrant
+**优点**:
+- 高性能,HNSW 索引支持
+- 支持元数据过滤和复杂查询
+- 易于部署,支持 Docker 和 Kubernetes
+- 优秀的 Python SDK
+- 支持实时更新和删除
+- 开源免费,企业版提供高级功能
+
+**缺点**:
+- 相对较新,生态不如 Pinecone 成熟
+- 云服务仍在发展中
+
+### 方案 B: Pinecone
+**优点**:
+- 托管服务,无需运维
+- 性能优异
+- 企业级功能完善
+- 易于上手
+
+**缺点**:
+- 闭源,无法私有化部署
+- 成本较高(尤其大规模)
+- 中国大陆访问可能较慢
+- 功能定制受限
+
+### 方案 C: Milvus
+**优点**:
+- 功能全面,支持多种索引
+- 高性能,可扩展性强
+- 支持多种部署方式
+
+**缺点**:
+- 架构复杂,部署和运维成本高
+- Python SDK 不如 Qdrant 友好
+- 学习曲线陡峭
+
+### 方案 D: Weaviate
+**优点**:
+- GraphQL API,查询灵活
+- 内置向量化模块
+- 支持多模态
+
+**缺点**:
+- 性能不如 Qdrant 和 Milvus
+- 资源占用较高
+- 社区相对较小
+
+### 方案 E: Chroma
+**优点**:
+- 轻量级,易于使用
+- 适合小规模应用
+- 集成方便
+
+**缺点**:
+- 性能和扩展性有限
+- 生产环境可靠性不足
+- 功能相对简单
+
+## 评估矩阵
+
+| 维度 | Qdrant | Pinecone | Milvus | Weaviate | Chroma |
+|------|--------|----------|--------|----------|--------|
+| 性能 | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐ |
+| 易部署性 | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
+| 易用性 | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
+| 扩展性 | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐ |
+| 成本 | ⭐⭐⭐⭐⭐ | ⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
+| 生态成熟度 | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐ |
+| 私有化部署 | ⭐⭐⭐⭐⭐ | ❌ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
+
+## 决策理由
+
+1. **性能优异**: HNSW 索引,检索速度快(10 万条 < 10ms)
+2. **易于部署**: 支持 Docker 单机部署,Kubernetes 分布式部署
+3. **功能完善**: 支持元数据过滤、复杂查询、实时更新
+4. **开源免费**: 无需付费,可私有化部署,成本可控
+5. **Python SDK 友好**: API 设计优秀,易于集成
+6. **社区活跃**: GitHub Star 数高,更新频繁,问题解决快
+
+## 后果
+
+### 正面影响
+- 部署简单,降低运维成本
+- 性能满足需求,响应时间 < 100ms
+- 支持元数据过滤,检索精度高
+- 私有化部署,数据安全可控
+
+### 负面影响
+- 相比 Pinecone 托管服务,需要自行运维
+- 大规模场景需要分布式部署,增加复杂度
+
+### 风险
+- Qdrant 项目相对较新(2020年开源)
+- 云服务不如 Pinecone 成熟
+
+### 缓解措施
+- 密切关注 Qdrant 更新
+- 建立监控和告警
+- 定期备份,保证数据安全
+- 评估云服务选项(如 Qdrant Cloud)
+
+## 实施细节
+
+### 核心依赖
+
+```python
+qdrant-client==1.7.0
+```
+
+### Docker 部署
+
+```yaml
+# docker-compose.yml
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.7.0
+    ports:
+      - "6333:6333"  # HTTP
+      - "6334:6334"  # gRPC
+    volumes:
+      - ./qdrant_data:/qdrant/storage
+    environment:
+      - QDRANT__SERVICE__GRPC_PORT=6334
+```
+
+### Python SDK 使用示例
+
+```python
+from qdrant_client import QdrantClient
+from qdrant_client.models import Distance, VectorParams, PointStruct
+
+client = QdrantClient(host="localhost", port=6333)
+
+# 创建集合
+client.create_collection(
+    collection_name="knowledge",
+    vectors_config=VectorParams(size=1536, distance=Distance.COSINE)
+)
+
+# 插入向量
+client.upsert(
+    collection_name="knowledge",
+    points=[
+        PointStruct(
+            id=1,
+            vector=[0.1, 0.2, ...],  # 1536 维
+            payload={
+                "content": "这是一条知识",
+                "source": "manual",
+                "timestamp": "2026-03-02"
+            }
+        )
+    ]
+)
+
+# 搜索向量
+results = client.search(
+    collection_name="knowledge",
+    query_vector=[0.15, 0.25, ...],
+    limit=10,
+    query_filter={
+        "must": [
+            {"key": "source", "match": {"value": "manual"}}
+        ]
+    }
+)
+```
+
+### 配置说明
+
+```python
+from qdrant_client import QdrantClient
+from qdrant_client.http import models
+
+class QdrantConfig:
+    host: str = "localhost"
+    port: int = 6333
+    collection_name: str = "knowledge"
+    vector_size: int = 1536
+    distance: str = "Cosine"
+
+    # HNSW 索引参数
+    hnsw_m: int = 16  # 连接数
+    hnsw_ef_construct: int = 100  # 构建时的搜索范围
+
+    # 性能参数
+    optimizers_config = {
+        "indexing_threshold": 20000  # 索引阈值
+    }
+```
+
+### 性能优化
+
+1. **索引选择**: HNSW 索引,平衡速度和准确度
+2. **分片策略**: 按 source 或时间分片
+3. **缓存**: Redis 缓存热点查询
+4. **批量操作**: 批量 upsert 减少 API 调用
+
+## 相关决策
+
+- [ADR-001: Web 框架选型 - FastAPI](./ADR-001-web-framework.md)
+- [ADR-003: LLM 框架选型 - LangChain](./ADR-003-llm-framework.md)
+
+---
+
+**决策日期**: 2026-03-02
+**决策者**: Technical Architect

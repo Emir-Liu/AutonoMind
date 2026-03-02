@@ -1,0 +1,697 @@
+# AutonoMind 数据模型设计文档
+
+## 1. 文档信息
+
+| 字段 | 内容 |
+|------|------|
+| **文档名称** | AutonoMind 数据模型设计文档 |
+| **版本** | v1.0 |
+| **创建日期** | 2026-03-02 |
+| **作者** | Technical Architect |
+
+---
+
+## 2. 目录
+
+1. [概述](#3-概述)
+2. [关系型数据库设计](#4-关系型数据库设计)
+3. [向量数据库设计](#5-向量数据库设计)
+4. [缓存设计](#6-缓存设计)
+5. [消息队列设计](#7-消息队列设计)
+6. [对象存储设计](#8-对象存储设计)
+
+---
+
+## 3. 概述
+
+AutonoMind 使用多种数据存储方案,各有侧重:
+
+| 存储类型 | 用途 | 技术 |
+|---------|------|------|
+| **关系型数据库** | 业务数据持久化 | PostgreSQL |
+| **向量数据库** | 知识向量存储 | Qdrant |
+| **缓存** | 会话缓存、热点数据 | Redis |
+| **消息队列** | 异步任务通信 | RabbitMQ |
+| **对象存储** | 文档、文件存储 | MinIO |
+
+---
+
+## 4. 关系型数据库设计
+
+### 4.1 ER 图
+
+```
+┌─────────────┐       ┌─────────────┐
+│   Users     │      │  Sessions   │
+├─────────────┤       ├─────────────┤
+│ id (PK)     │──────▶│ id (PK)     │
+│ username    │       │ user_id (FK)│
+│ email       │       │ status      │
+│ ...         │       │ ...         │
+└─────────────┘       └──────┬──────┘
+                             │
+                             │ 1
+                             │
+                             │ N
+┌─────────────┐       ┌──────▼──────┐
+│ Knowledge   │       │  Messages   │
+├─────────────┤       ├─────────────┤
+│ id (PK)     │       │ id (PK)     │
+│ content     │       │ session_id  │
+│ source      │       │ role        │
+│ ...         │       │ ...         │
+└─────────────┘       └─────────────┘
+                             │
+                             │ N
+                             │
+                             │ 1
+┌─────────────┐       ┌──────▼──────┐
+│ Tools       │       │ExecLogs     │
+├─────────────┤       ├─────────────┤
+│ id (PK)     │       │ id (PK)     │
+│ name        │       │ session_id  │
+│ ...         │       │ step_type   │
+└─────────────┘       │ ...         │
+                      └─────────────┘
+```
+
+### 4.2 表结构
+
+#### 4.2.1 用户表 (users)
+
+存储用户基本信息和认证信息。
+
+```sql
+CREATE TABLE users (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    username VARCHAR(100) UNIQUE NOT NULL,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    api_key VARCHAR(255) UNIQUE,
+    role VARCHAR(50) DEFAULT 'user',  -- 'admin', 'user'
+    status VARCHAR(50) DEFAULT 'active',  -- 'active', 'inactive', 'suspended'
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_login_at TIMESTAMP,
+    metadata JSONB DEFAULT '{}',
+
+    INDEX idx_email (email),
+    INDEX idx_username (username),
+    INDEX idx_api_key (api_key),
+    INDEX idx_status (status)
+);
+
+COMMENT ON TABLE users IS '用户表';
+COMMENT ON COLUMN users.metadata IS '用户元数据,JSON 格式';
+```
+
+**字段说明**:
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `id` | UUID | 主键 |
+| `username` | VARCHAR(100) | 用户名,唯一 |
+| `email` | VARCHAR(255) | 邮箱,唯一 |
+| `password_hash` | VARCHAR(255) | 密码哈希 |
+| `api_key` | VARCHAR(255) | API Key |
+| `role` | VARCHAR(50) | 角色 |
+| `status` | VARCHAR(50) | 状态 |
+| `metadata` | JSONB | 元数据 |
+
+---
+
+#### 4.2.2 会话表 (sessions)
+
+存储 Agent 会话信息。
+
+```sql
+CREATE TABLE sessions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    status VARCHAR(50) DEFAULT 'active',  -- 'active', 'archived', 'closed'
+    message_count INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    closed_at TIMESTAMP,
+    metadata JSONB DEFAULT '{}',
+    agent_config JSONB DEFAULT '{}',
+
+    INDEX idx_user_id (user_id),
+    INDEX idx_status (status),
+    INDEX idx_created_at (created_at),
+    INDEX idx_updated_at (updated_at)
+);
+
+COMMENT ON TABLE sessions IS 'Agent 会话表';
+COMMENT ON COLUMN sessions.agent_config IS 'Agent 配置,包含 LLM、温度等参数';
+```
+
+**字段说明**:
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `id` | UUID | 主键 |
+| `user_id` | UUID | 用户 ID |
+| `status` | VARCHAR(50) | 状态 |
+| `message_count` | INTEGER | 消息数量 |
+| `agent_config` | JSONB | Agent 配置 |
+
+---
+
+#### 4.2.3 消息表 (messages)
+
+存储会话中的所有消息。
+
+```sql
+CREATE TABLE messages (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    session_id UUID NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    role VARCHAR(50) NOT NULL,  -- 'user', 'assistant', 'system'
+    content TEXT NOT NULL,
+    tokens_used INTEGER DEFAULT 0,
+    model VARCHAR(100),
+    retrieved_knowledge JSONB DEFAULT '[]',  -- 检索到的知识
+    execution_steps JSONB DEFAULT '[]',  -- 执行步骤
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    metadata JSONB DEFAULT '{}',
+
+    INDEX idx_session_id (session_id),
+    INDEX idx_created_at (created_at),
+    INDEX idx_role (role)
+);
+
+COMMENT ON TABLE messages IS '消息表';
+COMMENT ON COLUMN messages.retrieved_knowledge IS '检索到的知识列表';
+COMMENT ON COLUMN messages.execution_steps IS '执行步骤记录';
+```
+
+**字段说明**:
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `id` | UUID | 主键 |
+| `session_id` | UUID | 会话 ID |
+| `role` | VARCHAR(50) | 角色 |
+| `content` | TEXT | 消息内容 |
+| `tokens_used` | INTEGER | 使用的 token 数 |
+| `retrieved_knowledge` | JSONB | 检索到的知识 |
+| `execution_steps` | JSONB | 执行步骤 |
+
+---
+
+#### 4.2.4 知识表 (knowledge)
+
+存储知识条目的元数据。
+
+```sql
+CREATE TABLE knowledge (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    content TEXT NOT NULL,
+    source VARCHAR(255),  -- 'manual', 'document', 'evolution'
+    document_id UUID,  -- 关联文档 ID(如适用)
+    metadata JSONB DEFAULT '{}',
+    version INTEGER DEFAULT 1,
+    status VARCHAR(50) DEFAULT 'active',  -- 'active', 'archived', 'conflict'
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_by UUID REFERENCES users(id),
+
+    INDEX idx_status (status),
+    INDEX idx_source (source),
+    INDEX idx_document_id (document_id),
+    INDEX idx_created_at (created_at)
+);
+
+COMMENT ON TABLE knowledge IS '知识表';
+COMMENT ON COLUMN knowledge.version IS '知识版本号,支持版本控制';
+```
+
+**字段说明**:
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `id` | UUID | 主键 |
+| `content` | TEXT | 知识内容 |
+| `source` | VARCHAR(255) | 知识来源 |
+| `document_id` | UUID | 关联文档 ID |
+| `version` | INTEGER | 版本号 |
+| `status` | VARCHAR(50) | 状态 |
+
+---
+
+#### 4.2.5 知识冲突表 (knowledge_conflicts)
+
+记录知识冲突和解决记录。
+
+```sql
+CREATE TABLE knowledge_conflicts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    knowledge_id_1 UUID NOT NULL REFERENCES knowledge(id),
+    knowledge_id_2 UUID NOT NULL REFERENCES knowledge(id),
+    conflict_type VARCHAR(50),  -- 'contradiction', 'duplicate', 'outdated'
+    description TEXT,
+    resolution VARCHAR(50),  -- 'pending', 'resolved', 'ignored'
+    resolved_by UUID REFERENCES users(id),
+    resolved_at TIMESTAMP,
+    resolution_note TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    INDEX idx_knowledge_id_1 (knowledge_id_1),
+    INDEX idx_knowledge_id_2 (knowledge_id_2),
+    INDEX idx_status (resolution),
+    INDEX idx_created_at (created_at)
+);
+
+COMMENT ON TABLE knowledge_conflicts IS '知识冲突表';
+```
+
+---
+
+#### 4.2.6 文档表 (documents)
+
+存储上传的文档信息。
+
+```sql
+CREATE TABLE documents (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    filename VARCHAR(255) NOT NULL,
+    file_path VARCHAR(500),
+    file_size BIGINT,
+    file_type VARCHAR(50),  -- 'pdf', 'txt', 'md'
+    status VARCHAR(50) DEFAULT 'uploaded',  -- 'uploaded', 'processing', 'completed', 'failed'
+    knowledge_count INTEGER DEFAULT 0,
+    created_by UUID REFERENCES users(id),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    processed_at TIMESTAMP,
+    error_message TEXT,
+    metadata JSONB DEFAULT '{}',
+
+    INDEX idx_status (status),
+    INDEX idx_created_by (created_by),
+    INDEX idx_created_at (created_at)
+);
+
+COMMENT ON TABLE documents IS '文档表';
+```
+
+---
+
+#### 4.2.7 工具表 (tools)
+
+存储工具定义。
+
+```sql
+CREATE TABLE tools (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(255) UNIQUE NOT NULL,
+    description TEXT,
+    parameters JSONB NOT NULL,  -- 参数定义 schema
+    function_name VARCHAR(255),
+    module_path VARCHAR(255),
+    enabled BOOLEAN DEFAULT TRUE,
+    builtin BOOLEAN DEFAULT FALSE,  -- 是否为内置工具
+    created_by UUID REFERENCES users(id),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    INDEX idx_enabled (enabled),
+    INDEX idx_builtin (builtin),
+    INDEX idx_name (name)
+);
+
+COMMENT ON TABLE tools IS '工具表';
+COMMENT ON COLUMN tools.parameters IS '参数定义,JSON Schema 格式';
+```
+
+---
+
+#### 4.2.8 执行日志表 (execution_logs)
+
+存储 Agent 执行过程的详细日志。
+
+```sql
+CREATE TABLE execution_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    session_id UUID NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    message_id UUID REFERENCES messages(id),
+    step_type VARCHAR(50) NOT NULL,  -- 'retrieve', 'decide', 'execute', 'evolution'
+    step_name VARCHAR(255),
+    input JSONB,
+    output JSONB,
+    error_message TEXT,
+    duration_ms INTEGER,
+    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    metadata JSONB DEFAULT '{}',
+
+    INDEX idx_session_id (session_id),
+    INDEX idx_message_id (message_id),
+    INDEX idx_step_type (step_type),
+    INDEX idx_timestamp (timestamp)
+);
+
+COMMENT ON TABLE execution_logs IS '执行日志表';
+```
+
+---
+
+#### 4.2.9 任务表 (tasks)
+
+存储异步任务信息。
+
+```sql
+CREATE TABLE tasks (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    task_type VARCHAR(100) NOT NULL,  -- 'vectorize_document', 'evolution_check'
+    status VARCHAR(50) DEFAULT 'pending',  -- 'pending', 'running', 'completed', 'failed'
+    input_data JSONB,
+    output_data JSONB,
+    error_message TEXT,
+    retries INTEGER DEFAULT 0,
+    max_retries INTEGER DEFAULT 3,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    started_at TIMESTAMP,
+    completed_at TIMESTAMP,
+    created_by UUID REFERENCES users(id),
+
+    INDEX idx_status (status),
+    INDEX idx_task_type (task_type),
+    INDEX idx_created_at (created_at)
+);
+
+COMMENT ON TABLE tasks IS '异步任务表';
+```
+
+---
+
+#### 4.2.10 系统配置表 (system_config)
+
+存储系统配置。
+
+```sql
+CREATE TABLE system_config (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    key VARCHAR(255) UNIQUE NOT NULL,
+    value TEXT,
+    value_type VARCHAR(50) DEFAULT 'string',  -- 'string', 'json', 'number', 'boolean'
+    description TEXT,
+    is_public BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    INDEX idx_key (key),
+    INDEX idx_is_public (is_public)
+);
+
+COMMENT ON TABLE system_config IS '系统配置表';
+
+-- 插入默认配置
+INSERT INTO system_config (key, value, value_type, description) VALUES
+('max_knowledge_per_document', '1000', 'number', '每个文档最大知识条目数'),
+('max_file_upload_size', '104857600', 'number', '最大文件上传大小(字节)'),
+('llm_default_model', 'gpt-4', 'string', '默认 LLM 模型'),
+('llm_default_temperature', '0.7', 'number', '默认温度参数');
+```
+
+---
+
+### 4.3 索引优化
+
+```sql
+-- 复合索引
+CREATE INDEX idx_sessions_user_created ON sessions(user_id, created_at DESC);
+CREATE INDEX idx_messages_session_created ON messages(session_id, created_at ASC);
+CREATE INDEX idx_logs_session_step ON execution_logs(session_id, step_type, timestamp DESC);
+
+-- 部分索引
+CREATE INDEX idx_active_sessions ON sessions(updated_at) WHERE status = 'active';
+CREATE INDEX idx_active_knowledge ON knowledge(created_at) WHERE status = 'active';
+
+-- 全文搜索索引
+CREATE INDEX idx_knowledge_content_fts ON knowledge USING GIN(to_tsvector('english', content));
+```
+
+---
+
+### 4.4 数据完整性约束
+
+```sql
+-- 触发器:自动更新 updated_at
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- 应用触发器
+CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_sessions_updated_at BEFORE UPDATE ON sessions
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_knowledge_updated_at BEFORE UPDATE ON knowledge
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- 触发器:自动更新 message_count
+CREATE OR REPLACE FUNCTION update_message_count()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF TG_OP = 'INSERT' THEN
+        UPDATE sessions
+        SET message_count = message_count + 1
+        WHERE id = NEW.session_id;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER update_session_message_count
+    AFTER INSERT ON messages
+    FOR EACH ROW EXECUTE FUNCTION update_message_count();
+```
+
+---
+
+## 5. 向量数据库设计
+
+### 5.1 集合设计
+
+#### 5.1.1 知识向量集合 (knowledge_vectors)
+
+存储知识的向量表示。
+
+```python
+{
+    "collection_name": "knowledge_vectors",
+
+    "vectors_config": {
+        "size": 1536,  # OpenAI embedding 维度
+        "distance": "Cosine"
+    },
+
+    "optimizers_config": {
+        "indexing_threshold": 20000
+    },
+
+    "hnsw_config": {
+        "m": 16,  # 连接数
+        "ef_construct": 100  # 构建时搜索范围
+    }
+}
+```
+
+#### Payload Schema
+
+```json
+{
+    "knowledge_id": "UUID",
+    "source": "string",  // 'manual', 'document', 'evolution'
+    "document_id": "UUID (optional)",
+    "category": "string (optional)",
+    "tags": ["string"],
+    "created_at": "ISO8601 timestamp",
+    "version": "integer"
+}
+```
+
+### 5.2 向量操作示例
+
+#### 插入向量
+
+```python
+from qdrant_client import QdrantClient
+from qdrant_client.models import PointStruct
+
+client = QdrantClient(host="localhost", port=6333)
+
+# 批量插入
+client.upsert(
+    collection_name="knowledge_vectors",
+    points=[
+        PointStruct(
+            id=knowledge.id,
+            vector=embedding,
+            payload={
+                "knowledge_id": str(knowledge.id),
+                "source": knowledge.source,
+                "document_id": str(knowledge.document_id) if knowledge.document_id else None,
+                "created_at": knowledge.created_at.isoformat(),
+                "version": knowledge.version
+            }
+        )
+        for knowledge, embedding in zip(knowledges, embeddings)
+    ]
+)
+```
+
+#### 搜索向量
+
+```python
+results = client.search(
+    collection_name="knowledge_vectors",
+    query_vector=query_embedding,
+    limit=10,
+    query_filter={
+        "must": [
+            {"key": "source", "match": {"value": "manual"}},
+            {"key": "version", "match": {"value": 1}}
+        ]
+    },
+    score_threshold=0.7
+)
+```
+
+---
+
+### 5.3 分片策略
+
+```python
+# 按 source 分片
+collections = {
+    "knowledge_manual": "手动添加的知识",
+    "knowledge_document": "文档提取的知识",
+    "knowledge_evolution": "知识进化的知识"
+}
+```
+
+---
+
+## 6. 缓存设计
+
+### 6.1 Redis 数据结构
+
+| Key | 类型 | TTL | 说明 |
+|-----|------|-----|------|
+| `session:{session_id}` | Hash | 1h | 会话上下文缓存 |
+| `knowledge:search:{hash(query)}` | String | 10min | 知识检索缓存 |
+| `embedding:{hash(text)}` | String | 24h | 向量化缓存 |
+| `user:{user_id}:quota` | String | 1h | 用户配额 |
+| `rate_limit:{user_id}` | String | 1min | 速率限制 |
+
+### 6.2 缓存示例
+
+#### 会话缓存
+
+```python
+# 存储会话上下文
+await redis.hset(
+    f"session:{session_id}",
+    mapping={
+        "context": json.dumps(context),
+        "last_message_id": last_message_id,
+        "metadata": json.dumps(metadata)
+    }
+)
+await redis.expire(f"session:{session_id}", 3600)  # 1h
+```
+
+#### 知识检索缓存
+
+```python
+# 缓存检索结果
+cache_key = f"knowledge:search:{hashlib.md5(query.encode()).hexdigest()}"
+
+results = await redis.get(cache_key)
+if results:
+    return json.loads(results)
+
+# 执行检索
+results = await retriever.search(query, top_k=10)
+
+# 缓存结果
+await redis.setex(cache_key, 600, json.dumps(results))  # 10min
+```
+
+---
+
+## 7. 消息队列设计
+
+### 7.1 队列定义
+
+| 队列名 | 用途 |
+|-------|------|
+| `knowledge_queue` | 知识向量化任务 |
+| `agent_queue` | Agent 执行任务 |
+| `evolution_queue` | 知识进化任务 |
+| `document_queue` | 文档处理任务 |
+
+### 7.2 消息格式
+
+#### 知识向量化任务
+
+```json
+{
+    "task_id": "task_001",
+    "task_type": "vectorize_knowledge",
+    "data": {
+        "knowledge_id": "kno_001",
+        "content": "知识内容"
+    },
+    "priority": "normal"
+}
+```
+
+---
+
+## 8. 对象存储设计
+
+### 8.1 存储桶结构
+
+```
+autonomind/
+├── documents/
+│   ├── user_{user_id}/
+│   │   └── {document_id}.pdf
+├── exports/
+│   ├── sessions/
+│   └── knowledge/
+└── backups/
+    ├── daily/
+    └── weekly/
+```
+
+### 8.2 文件路径规范
+
+```python
+def get_document_path(user_id: str, document_id: str, filename: str) -> str:
+    """生成文档存储路径"""
+    return f"documents/user_{user_id}/{document_id}/{filename}"
+```
+
+---
+
+## 9. 数据备份策略
+
+| 备份类型 | 频率 | 保留期 | 存储位置 |
+|---------|------|--------|---------|
+| **全量备份** | 每日 | 30 天 | MinIO + 异地 |
+| **增量备份** | 每小时 | 7 天 | MinIO |
+| **向量备份** | 每日 | 30 天 | MinIO |
+| **日志归档** | 每周 | 90 天 | MinIO |
+
+---
+
+**文档版本**: v1.0
+**最后更新**: 2026-03-02

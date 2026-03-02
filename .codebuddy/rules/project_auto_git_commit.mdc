@@ -1,0 +1,133 @@
+# 自动 Git 提交规则
+
+## 规则名称
+`project_auto_git_commit`
+
+## 规则描述
+在每次文件修改后自动将更改提交到 Git 仓库并推送到远程分支，确保代码变更及时记录和同步。
+
+## 执行条件
+- ✅ 任何代码文件被修改、创建或删除
+- ✅ 任务执行完毕后
+- ✅ 代码编辑操作完成后
+
+## 执行流程
+
+### 1. 检测更改
+检查当前工作区是否有未提交的修改：
+```bash
+git status
+```
+
+### 2. 暂存更改
+自动暂存所有更改：
+```bash
+git add .
+```
+
+### 3. 生成提交信息
+根据修改内容智能生成提交信息：
+- 新增文件: "feat: add [文件描述]"
+- 修改文件: "fix: update [文件描述]"
+- 删除文件: "refactor: remove [文件描述]"
+- 多文件变更: "chore: [变更摘要]"
+
+### 4. 提交更改
+执行提交：
+```bash
+git commit -m "[生成的提交信息]"
+```
+
+### 5. 推送到远程 (自动)
+**自动推送到当前分支的远程仓库**：
+```bash
+git push origin [当前分支名]
+```
+
+如果推送失败（如远程有更新），会提示用户先拉取：
+```bash
+git pull --rebase origin [当前分支名]
+git push origin [当前分支名]
+```
+
+## 例外处理
+
+| 情况 | 处理方式 |
+|------|----------|
+| 无更改 | 跳过提交流程，输出"无更改需要提交" |
+| 提交冲突 | 提示用户手动解决冲突后再提交 |
+| 推送冲突（远程有更新） | 自动执行 `git pull --rebase`，然后重新推送 |
+| 提交信息不满意 | 允许用户手动修改提交信息 |
+| 需要分批提交 | 用户可手动控制暂存区域 |
+
+## 技能调用
+使用 `git-manager` 技能执行 Git 操作：
+
+```python
+use_skill(command="git-manager")
+```
+
+## 示例
+
+### 场景 1: 单文件修改
+```bash
+# 修改 backend/app/services/ai_service.py
+# 自动执行:
+git add backend/app/services/ai_service.py
+git commit -m "fix: update AI service error handling"
+git push origin develop
+```
+
+### 场景 2: 多文件变更
+```bash
+# 修改多个文件
+# 自动执行:
+git add .
+git commit -m "feat: implement user authentication flow"
+git push origin develop
+```
+
+### 场景 3: 新增功能
+```bash
+# 新增功能模块
+# 自动执行:
+git add .
+git commit -m "feat: add task management module"
+git push origin develop
+```
+
+## 注意事项
+
+1. **提交信息质量**: 生成的提交信息应清晰描述变更内容
+2. **分支安全**: 始终提交到当前分支，避免错误提交到主分支（如 main/master）
+3. **自动推送**: **默认自动推送到远程仓库**，确保代码同步
+4. **冲突处理**: 遇到合并冲突时暂停自动提交，提示用户处理
+5. **推送分支**: 推送前确认当前分支名称，避免推送错误分支
+
+## 验证规则生效
+
+检查规则是否正确执行：
+```bash
+# 查看最近的提交记录
+git log --oneline -5
+
+# 查看详细提交信息
+git log -1 --stat
+
+# 检查远程同步状态
+git status
+```
+
+## 禁用规则
+
+如需临时禁用自动提交，可在提交信息前缀添加 `[SKIP]`：
+```bash
+# 修改完成后，在操作中标记跳过自动提交
+```
+
+---
+
+**版本**: 1.1.0  
+**更新日期**: 2026-03-02  
+**变更**: 增加自动推送到远程仓库功能  
+**状态**: 生效中
